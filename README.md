@@ -9,9 +9,10 @@ This  web crawler is a light version of a big bots like GoogleBot, YandexBot and
 ## Requirements
  * Boost.Asio
  * Boost.Beast
+ * Gumbo parser
 
 ## Usage
 You should build the project and run 
 ```bash
-http-crawl <threads>
+http-crawl <config path>
 ```
