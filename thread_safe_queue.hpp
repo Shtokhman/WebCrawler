@@ -8,9 +8,12 @@
 template<typename T>
 class thread_safe_queue {
 
-    std::mutex mut;
-    std::queue<T> data_queue;
+
     std::condition_variable data_cond;
+
+    std::mutex mut;
+
+    std::queue<T> data_queue;
 
 public:
     thread_safe_queue() = default;
@@ -21,13 +24,15 @@ public:
         data_cond.notify_one();
     }
 
-    void wait_and_pop(T & value) {
+    void pop(T & value) {
+
         std::unique_lock<std::mutex> lk(mut);
+
         data_cond.wait(lk, [this] { return !data_queue.empty(); });
+
         value = data_queue.front();
         data_queue.pop();
     }
-
 
     [[nodiscard]] bool empty() const {
         std::lock_guard<std::mutex> lk(mut);
