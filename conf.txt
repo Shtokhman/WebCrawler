@@ -1,3 +1,3 @@
-forbes.com              # source web page url 
-100                     # number of working threads
-100000				    # number of pages to index
+go.com          # source web page url
+4               # number of working threads
+50			    # number of pages to index by each working thread
