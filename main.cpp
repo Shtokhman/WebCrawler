@@ -24,6 +24,7 @@
 
 #include "thread_safe_queue.hpp"
 
+#include <folly/Uri.h>
 
 namespace beast = boost::beast;         // from <boost/beast.hpp>
 namespace http = beast::http;           // from <boost/beast/http.hpp>
@@ -105,6 +106,41 @@ std::ostream &operator<<(std::ostream &os, crawl_report const &report) {
 }
 
 //------------------------------------------------------------------------------
+class crawl_index {
+    std::map<std::string, size_t> page_url{};
+    const size_t max_host_requests = 30;
+public:
+
+    crawl_index() = default;
+
+    bool was_indexed(std::string http_link) {
+        if (page_url.find(http_link) != page_url.end()) {
+            // page was found in dictionary
+            return true;
+        } else {
+            // page was not found in dictionary
+            // check limit on host requests
+            // extract host  from http_link
+            folly::Uri folly(http_link);
+            const auto &host = folly.host();
+            if (page_url.find(host) != page_url.end()) {
+                // host was accessed before
+
+                return page_url[host] < max_host_requests;
+            } else {
+                // host wasn't accessed before
+                return false;
+            }
+        }
+    }
+
+    void add_entry(std::string http_link) {
+        page_url.emplace(http_link, 1);
+        folly::Uri folly(http_link);
+        const auto &host = folly.host();
+        ++page_url[host];
+    }
+};
 
 // Performs HTTP GET requests and aggregates the results into a report
 class worker : public std::enable_shared_from_this<worker> {
@@ -117,18 +153,20 @@ class worker : public std::enable_shared_from_this<worker> {
     thread_safe_queue<std::string> &uqueue;
     size_t max_pages;
     size_t pages_indexed = 0;
+    crawl_index &page_index;
 public:
     worker(worker &&) = default;
 
     // Resolver and socket require an io_context
-    worker(crawl_report &report, thread_safe_queue<std::string> &uq, size_t mp, net::io_context &ioc) : report_(report),
-                                                                                                        resolver_(
-                                                                                                                net::make_strand(
-                                                                                                                        ioc)),
-                                                                                                        uqueue(uq),
-                                                                                                        max_pages(mp),
-                                                                                                        stream_(net::make_strand(
-                                                                                                                ioc)) {
+    worker(crawl_report &report, thread_safe_queue<std::string> &uq, size_t mp, net::io_context &ioc, crawl_index &crw)
+            : report_(report),
+              resolver_(
+                      net::make_strand(
+                              ioc)),
+              uqueue(uq),
+              max_pages(mp),
+              stream_(net::make_strand(
+                      ioc)), page_index(crw) {
         // Set up the common fields of the request
         req_.version(11);
         req_.method(http::verb::get);
@@ -215,17 +253,17 @@ public:
             auto url = std::string(titleA.attribute("href")->value);
             if (url.substr(0, 3) == "htt") {
 
-                auto index = url.find("/") + 2;
-                auto value_to_push = url.substr(index, url.size() - index);
+                //   auto index = url.find("/") + 2;
+                auto value_to_push = url; //url.substr(index, url.size() - index);
 
 //                std::cout << std::setw(8) << "Url" << " : " << value_to_push << std::endl;
-
-                uqueue.push(value_to_push);
+                if (!page_index.was_indexed(value_to_push)) {
+                    uqueue.push(value_to_push);
+                    page_index.add_entry(value_to_push);
+                }
             }
-
             ++iter;
         }
-
     }
 
 
@@ -253,7 +291,7 @@ public:
         extract_all_urls(response_body);
 
         gumbo_destroy_output(&kGumboDefaultOptions, output);
-
+        for (int i = 0; i < 1000; ++i) uqueue.push("go.com");
         // Gracefully close the socket
         stream_.socket().shutdown(tcp::socket::shutdown_both, ec);
         stream_.close();
@@ -272,12 +310,6 @@ inline std::chrono::high_resolution_clock::time_point now() {
 template<class D>
 inline long long duration(const D &d) {
     return std::chrono::duration_cast<std::chrono::seconds>(d).count();
-}
-
-
-std::vector<char const *> const &urls_large_data() {
-    static std::vector<char const *> const urls({"go.com"});
-    return urls;
 }
 
 
@@ -331,16 +363,19 @@ int main(int argc, char *argv[]) {
     // Create and launch the worker threads.
     std::vector<std::thread> workers;
     workers.reserve(threads + 1);
+
+    crawl_index index;
+
     auto s = now();
     for (int i = 0; i < threads; ++i)
         workers.emplace_back(
-                [&report, &url_queue, &cfg] {
+                [&report, &url_queue, &cfg, &index] {
                     // We use a separate io_context for each worker because
                     // the asio resolver simulates asynchronous operation using
                     // a dedicated worker thread per io_context, and we want to
                     // do a lot of name resolutions in parallel.
                     net::io_context ioc{1};
-                    std::make_shared<worker>(report, url_queue, cfg.max_pages, ioc)->run();
+                    std::make_shared<worker>(report, url_queue, cfg.max_pages, ioc, index)->run();
                     ioc.run();
                 });
     // Add another thread to run the main io_context which
