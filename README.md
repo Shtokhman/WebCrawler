@@ -14,5 +14,6 @@ This  web crawler is a light version of a big bots like GoogleBot, YandexBot and
 ## Usage
 You should build the project and run 
 ```bash
-http-crawl <config path>
+web-crawler <config path>
 ```
+## For more info take a look at [presentation](https://docs.google.com/presentation/d/1sOQQj4-YYnKBPaOIhDzKHRyITRYa_SSTIugk-r2ZlkU/edit?usp=sharing)
