@@ -10,6 +10,8 @@ This  web crawler is a light version of a big bots like GoogleBot, YandexBot and
  * Boost.Asio
  * Boost.Beast
  * Gumbo parser
+ * Facebook Folly
+ * gflags
 
 ## Usage
 You should build the project and run 
