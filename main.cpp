@@ -25,7 +25,10 @@
 #include "thread_safe_queue.hpp"
 
 #include <folly/Uri.h>
+#include <boost/filesystem.hpp>
 
+
+namespace bf = boost::filesystem;
 namespace beast = boost::beast;         // from <boost/beast.hpp>
 namespace http = beast::http;           // from <boost/beast/http.hpp>
 namespace net = boost::asio;            // from <boost/asio.hpp>
@@ -154,6 +157,7 @@ class worker : public std::enable_shared_from_this<worker> {
     size_t max_pages;
     size_t pages_indexed = 0;
     crawl_index &page_index;
+    std::string host;
 public:
     worker(worker &&) = default;
 
@@ -178,10 +182,10 @@ public:
     void run() { do_get_host(); }
 
     void do_get_host() {
+        host = "";
         if (pages_indexed >= max_pages) return;
 
         // Grab another host
-        std::string host;
         uqueue.pop(host);
 
         // The Host HTTP field is required
@@ -203,11 +207,7 @@ public:
         // Set a timeout on the operation
         stream_.expires_after(std::chrono::seconds(10));
         // See IP address from a lookup
-        /*for (auto &v: results) {
-            std::cout << v.endpoint() << std::endl;
-            std::cout << v.host_name() << std::endl;
-            std::cout << v.service_name() << std::endl;
-        }*/
+
         // Make the connection on the IP address we get from a lookup
         stream_.async_connect(results, beast::bind_front_handler(&worker::on_connect, shared_from_this()));
     }
@@ -250,11 +250,8 @@ public:
             }
             EasyGumbo::Element titleA(*iter);
             // std::cout << "***\n";
-            auto url = std::string(titleA.attribute("href")->value);
-            if (url.substr(0, 3) == "htt") {
-
-                //   auto index = url.find("/") + 2;
-                auto value_to_push = url; //url.substr(index, url.size() - index);
+            auto value_to_push = std::string(titleA.attribute("href")->value);
+            if (value_to_push.substr(0, 3) == "htt") {
 
 //                std::cout << std::setw(8) << "Url" << " : " << value_to_push << std::endl;
                 if (!page_index.was_indexed(value_to_push)) {
@@ -286,12 +283,13 @@ public:
 
         std::string response_body = res_.body();
 
+        std::ofstream html_page_code("../indexed_pages/" + host + ".html");
+        html_page_code << response_body << std::endl;
+
         GumboOutput *output = gumbo_parse(response_body.c_str());
 
         extract_all_urls(response_body);
-
         gumbo_destroy_output(&kGumboDefaultOptions, output);
-        for (int i = 0; i < 1000; ++i) uqueue.push("go.com");
         // Gracefully close the socket
         stream_.socket().shutdown(tcp::socket::shutdown_both, ec);
         stream_.close();
@@ -307,6 +305,7 @@ inline std::chrono::high_resolution_clock::time_point now() {
     return res_time;
 }
 
+
 template<class D>
 inline long long duration(const D &d) {
     return std::chrono::duration_cast<std::chrono::seconds>(d).count();
@@ -315,7 +314,7 @@ inline long long duration(const D &d) {
 
 class config {
 public:
-    std::string seed_webpage{};
+    std::vector<std::string> seed_webpage{};
     size_t max_pages = 0;
     size_t threads_count = 0;
 };
@@ -327,11 +326,16 @@ void read_config(std::string &&filename, config &cfg) {
         std::cerr << "Failed to open configuration file " << filename << std::endl;
         return;
     }
-    cf >> cfg.seed_webpage;
-    getline(cf, temp);
+    std::string seed_url;
     cf >> cfg.threads_count;
     getline(cf, temp);
     cf >> cfg.max_pages;
+    getline(cf, temp);
+    getline(cf, temp);
+    while (seed_url != "end") {
+        cf >> seed_url;
+        cfg.seed_webpage.push_back(seed_url);
+    }
 }
 
 
@@ -351,7 +355,7 @@ int main(int argc, char *argv[]) {
     read_config(std::string(argv[1]), cfg);
 
     thread_safe_queue<std::string> url_queue;
-    url_queue.push(cfg.seed_webpage);
+    for (auto &v : cfg.seed_webpage) url_queue.push(v);
     auto const threads = cfg.threads_count;
     // The io_context is required for all I/O
     net::io_context ioc;
@@ -365,6 +369,7 @@ int main(int argc, char *argv[]) {
     workers.reserve(threads + 1);
 
     crawl_index index;
+    bf::create_directory(bf::path("../indexed_pages/"));
 
     auto s = now();
     for (int i = 0; i < threads; ++i)
