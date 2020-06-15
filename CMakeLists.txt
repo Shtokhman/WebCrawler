@@ -14,6 +14,6 @@ set(Boost_USE_MULTITHREADED ON)
 
 include_directories(${Boost_INCLUDE_DIRS})
 
-add_executable(web-crawler main.cpp thread_safe_queue.hpp gumbo_utils.hpp root_certificates.hpp)
+add_executable(web-crawler main.cpp thread_safe_queue.hpp gumbo_utils.hpp)
 
 target_link_libraries(web-crawler Threads::Threads ${Boost_LIBRARIES} "-I/usr/local/include -L/usr/local/lib/ -lgumbo")
